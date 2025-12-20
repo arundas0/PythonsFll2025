@@ -2,11 +2,11 @@ from pybricks.hubs import PrimeHub
 from pybricks.pupdevices import Motor, ColorSensor
 from pybricks.robotics import DriveBase
 from pybricks.parameters import Port, Direction, Button, Stop
-from pybricks.tools import wait
+from pybricks.tools import wait, StopWatch
 from pybricks.parameters import Color
 
 # -----------------------------
-# Robot configuratio
+# Robot configuration
 # -----------------------------
 WHEEL_RADIUS_CM = 3.175
 WHEEL_DIAMETER_MM = WHEEL_RADIUS_CM * 2 * 10  # cm -> mm
@@ -54,6 +54,71 @@ def setup_drive():
     robot.settings(straight_speed=300, straight_acceleration=300)
     beep_ok()
 
+def gyro_turn(target_angle: float, mode: str = "medium", axle_turn: bool = True):
+    """
+    Turn the robot using the gyro with preset speed modes.
+
+    Args:
+        target_angle: desired turn in degrees (+ right, - left)
+        mode: 'slow', 'medium', or 'fast'
+        axle_turn: True for single-axle scaling, False for wider turn scaling
+    """
+    speeds = {
+        "error_correction": 25,
+        "slow": 100,
+        "medium": 150,
+        "fast": 200,
+    }
+    speed = speeds.get(mode, 200)
+    axle = 1 if axle_turn else 3
+
+    # Reset gyro angle
+    hub.imu.reset_heading(0)
+    start_angle = hub.imu.heading()
+    print(f"[gyro_turn] Start angle: {start_angle}, target: {target_angle}, speed: {speed}")
+
+    # Decide turn direction and start motors
+    if target_angle > 0:
+        left_motor.run(axle * speed)
+        right_motor.run(-speed)
+    else:
+        left_motor.run(-speed)
+        right_motor.run(axle * speed)
+
+    # Keep turning until target reached
+    while abs(hub.imu.heading()) < abs(target_angle):
+        wait(10)
+
+    # Stop motors
+    left_motor.stop()
+    right_motor.stop()
+
+    print(f"[gyro_turn] without correction angle: {hub.imu.heading()}")
+    end_angle = hub.imu.heading()
+
+    # Optional fine correction
+    error = target_angle - end_angle
+    if abs(error) > 2:  # tolerance in degrees
+        correction_speed = speeds["error_correction"]
+
+        if error > 0:
+            left_motor.run(correction_speed)
+            right_motor.run(-correction_speed)
+            wait(10)
+        else:
+            left_motor.run(-correction_speed)
+            right_motor.run(correction_speed)
+            wait(10)
+
+        while abs(hub.imu.heading() - target_angle) > 2:
+            wait(10)
+
+        left_motor.stop()
+        right_motor.stop()
+
+        print(f"[gyro_turn] Corrected final angle: {hub.imu.heading()}")
+
+
 def drive_cm(distance_cm, velocity_cm_s, acceleration_cm_s2, stop=Stop.HOLD):
     """Drive a set distance in cm using DriveBase (mm units internally)."""
     distance_mm = distance_cm * 10
@@ -64,46 +129,59 @@ def drive_cm(distance_cm, velocity_cm_s, acceleration_cm_s2, stop=Stop.HOLD):
     robot.straight(distance_mm)
     robot.stop()  # DriveBase stop uses internal behavior; motors also hold by default
 
+def drive_cm_stall(distance_cm: float,
+             velocity_cm_s: float,
+             acceleration_cm_s2: float,
+             stop: Stop = Stop.HOLD,
+             poll_ms: int = 10) -> bool:
+    """
+    Drive a set distance in cm using DriveBase (mm units internally).
+    Returns True if the motion completed, False if a stall was detected.
+    Relies only on robot.stalled (property) and robot.done() for completion.
+    """
+    distance_mm = distance_cm * 10
+    speed_mm_s = velocity_cm_s * 10
+    accel_mm_s2 = acceleration_cm_s2 * 10
+
+    # Configure DriveBase
+    robot.settings(straight_speed=speed_mm_s, straight_acceleration=accel_mm_s2)
+
+    # Start motion non-blocking so we can poll for stall
+    robot.straight(distance_mm, wait=False)
+    print(f"initial postion : {getattr(robot, "stalled", False)}")
+    print("inside drice with stall")
+
+    # Poll until done or stalled
+    while True:
+        print("inside drice with stall while loop")
+        print(robot.stalled())
+        # Stall is a property, not a callable
+        if robot.stalled():
+            print(robot.stalled())
+            # Stop the robot immediately and report failure
+            print("motor is stalled")
+            robot.stop()
+            return False
+
+        # Use done() to detect normal completion
+        done_fn = getattr(robot, "done", None)
+        if callable(done_fn) and robot.done():
+            # Ensure final stop behavior matches requested 'stop'
+            if stop is Stop.HOLD:
+                robot.stop()
+            elif stop is Stop.BRAKE:
+                robot.stop()
+            else:
+                robot.stop()
+            return True
+
+        wait(100)
+
 def run_motor_for_degrees(m: Motor, degrees: int, speed: int, accel: int = 1000, stop=Stop.HOLD):
 
     # Note: Motor.run_angle(speed, rotation_angle) is blocking.
     m.run_angle(speed, degrees, then=stop, wait=True)
 
-def gyro_turn(target_deg, slow_turn=False,axis_turn=True):
-   
-    # PrimeHub IMU heading is degrees. Reset to 0.
-    hub.imu.reset_heading(0)
-    wait(150)
-
-    # Tune these for your robot
-    speed = 100 if slow_turn else 400
-    power = 40 if slow_turn else 60  # used as a coarse steer factor
-    turn_speed = 1 if axis_turn else 3
-
-    # We’ll spin in place by running motors opposite directions.
-    # Loop until heading reaches target.
-    while True:
-        emergency_stop_check()
-        heading = hub.imu.heading()
-
-        # Normalize heading to [-180, 180] to match typical gyro turn logic
-        if heading > 180:
-            heading -= 360
-
-        if abs(heading) >= abs(target_deg):
-            break
-
-        if target_deg > 0:  # left
-            left_motor.run(-speed)
-            right_motor.run(turn_speed*speed)
-        else:               # right
-            left_motor.run(turn_speed*speed)
-            right_motor.run(-speed)
-
-        wait(100)
-
-    left_motor.stop()
-    right_motor.stop()
 
 # -----------------------------
 # Mission implementations (0–5)
@@ -113,57 +191,46 @@ def mission_0():
     setup_drive()
     print("Mission 0")
 
+    hub.imu.reset_heading(0)
+    wait(200)
+
     drive_cm(15, 30, 50)
-    gyro_turn(10, slow_turn=True,axis_turn=True)
-    wait(500)
+    gyro_turn(-12, mode="medium")
+    wait(200)
 
-    drive_cm(55, 100, 50)
-    gyro_turn(-55, slow_turn=True)
-
+    drive_cm(55, 100, 40)
+    wait(200)
+    gyro_turn(55, mode="medium")
+    wait(200)
     drive_cm(10, 30, 30)
 
     run_motor_for_degrees(motor_d, -1000, 1000) # SPIKE: move_sidearm_mission9(port.D, -1000, 1000, 500)
-    run_motor_for_degrees(motor_c, 200, 1000) # SPIKE: move_sidearm_mission9(port.C, 100, 1000, 500)
+    run_motor_for_degrees(motor_c, 50, 500) # SPIKE: move_sidearm_mission9(port.C, 100, 1000, 500)
     print("Turn completed")
-    drive_cm(-4, 30, 50)
-    print("drive complete")
-    gyro_turn(40, slow_turn=False)
-    drive_cm(-60, 30, 50)
-    gyro_turn(45, slow_turn=False)
-    drive_cm(-30, 30, 50)
+    gyro_turn(-35, mode="medium")
+    drive_cm(-60, 100, 500)
+    gyro_turn(-90, mode="fast")
+    drive_cm(-60, 100, 500)
 
 def mission_1():
     setup_drive()
     print("Mission 1")
-
+    
     hub.imu.reset_heading(0)
     wait(200)
 
-    drive_cm(14, 30, 50)
-    gyro_turn(45, slow_turn=True)
+    drive_cm(12, 30, 50)
+    gyro_turn(-45, mode="medium")
+    run_motor_for_degrees(motor_c, 150, 300)     # move_sidearm_mission9(port.C, 150, 720, 1000)
+    drive_cm(39, 30, 50)
 
-    run_motor_for_degrees(motor_c, 150, 720)     # move_sidearm_mission9(port.C, 150, 720, 1000)
-
-    drive_cm(33, 30, 50)
-
-    run_motor_for_degrees(motor_c, -120, 100)    # move_sidearm_mission9(port.C, -120, 100, 100)
-
-    run_motor_for_degrees(motor_d, -720, 500)    # move_sidearm_mission9(port.D, -720, 500, 1000)
-    run_motor_for_degrees(motor_c, 180, 1440)    # move_sidearm_mission9(port.C, 180, 1440, 1000)
-    run_motor_for_degrees(motor_d, 720, 360)     # move_sidearm_mission9(port.D, 720, 360, 1000)
-
-    drive_cm(-35, 30, 30)
-    wait(200)
-    drive_cm(10, 30, 50)
-
-    gyro_turn(-30, slow_turn=False)
-
-    drive_cm(-15, 300, 50)
-
-    run_motor_for_degrees(motor_c, -120, 1000)
-    gyro_turn(60, slow_turn=False)
-    drive_cm(-40, 300, 50)
-
+    motor_c.run_until_stalled(-100,Stop.BRAKE,50)    # move_sidearm_mission9(port.C, -120, 100, 100)
+    run_motor_for_degrees(motor_d, -500, 500)   
+    run_motor_for_degrees(motor_c, 180, 1000) 
+    drive_cm_stall(-15, 30, 20)
+    drive_cm_stall(10, 30, 10)
+    run_motor_for_degrees(motor_d, 600, 1000)     # move_sidearm_mission9(port.D, 720, 360, 1000)
+    drive_cm(-30, 30, 100)
 def mission_2():
     setup_drive()
     print("Mission 2")
@@ -171,23 +238,21 @@ def mission_2():
     hub.imu.reset_heading(0)
     wait(200)
 
-    # Your SPIKE code had a commented-out 10cm move; keeping behavior similar:
-    # drive_cm(10, 30, 50)
+    # drive_cm(37, 30, 50)
 
-    drive_cm(37, 30, 50)
+    # # SPIKE had a complex stall-detect version; here is a simpler "repeat wiggle" version:
+    # # for _ in range(3):  # repetitions=3
+    # #     run_motor_for_degrees(motor_c, -180, 750)
+    # #     run_motor_for_degrees(motor_c, 180, 750)
 
-    # SPIKE had a complex stall-detect version; here is a simpler "repeat wiggle" version:
-    for _ in range(3):  # repetitions=3
-        run_motor_for_degrees(motor_c, -180, 750)
-        run_motor_for_degrees(motor_c, 180, 750)
+    # drive_cm(-15.5, 30, 50)
 
-    drive_cm(-15.5, 30, 50)
-
-    hub.imu.reset_heading(0)
-    wait(200)
-    gyro_turn(90, slow_turn=True)
-
-    drive_cm(195, 500, 500)
+    # hub.imu.reset_heading(0)
+    # wait(200)
+    # gyro_turn(-45, mode="medium")
+    # gyro_turn(-45, mode="medium")
+    drive_cm(100, 100, 50)
+    drive_cm(100, 100, 50)
 
 def mission_3():
     # This matches your “Challenge H 90” style (your Mission 3 file)
@@ -213,7 +278,7 @@ def mission_4():
 
 
     drive_cm(69, 20, 500)
-    gyro_turn(43, slow_turn=True)
+    gyro_turn(-43, mode="slow")
 
     drive_cm(23, 30, 200)
 
@@ -229,50 +294,35 @@ def mission_4():
     run_motor_for_degrees(motor_c, -300, 500)
 
     drive_cm(-22, 17, 500)
-    gyro_turn(140, slow_turn=False)
+    gyro_turn(140, mode="fast")
 
     drive_cm(61, 30, 500)
 
 def mission_5():
     print("Mission 5#")
     setup_drive()
-    #motor_d.close()
    
     hub.imu.reset_heading(0)
     wait(200)
 
     drive_cm(80, 30, 50)
-    gyro_turn(-90, slow_turn=True,axis_turn=True)
+    gyro_turn(90, mode="slow")
     motor_c.run_until_stalled(600, then=Stop.BRAKE, duty_limit=35)
     drive_cm(14, 30, 50)
     run_motor_for_degrees(motor_c, -400, 300)
-    gyro_turn(-35, slow_turn=True)
+    gyro_turn(-35, mode="slow")
     motor_d.run_until_stalled(-600, then=Stop.BRAKE, duty_limit=35)
     drive_cm(18, 30, 50)
     run_motor_for_degrees(motor_d, 400, 500)
-    gyro_turn(20, slow_turn=False)
+    gyro_turn(20, mode="fast")
 
-    #control_lift_motor = Motor(Port.D,Direction.COUNTERCLOCKWISE,[[12,20],[12,20]])
-    #control_lift_motor.run_until_stalled(-200,then=Stop.BRAKE,duty_limit=10)
-#    drive_cm(10, 30, 5)
-    # control_lift_motor.run_angle(200,-90,then=Stop.HOLD,wait=True)
-
-    # drive_cm(-35, 30, 5)
-    # gyro_turn(21, slow_turn=True)
-    # control_lift_motor.run_angle(200,-30,then=Stop.HOLD,wait=True)
-    # drive_cm(-10, 30, 5)   
-    # control_lift_motor.run_angle(200,50,then=Stop.HOLD,wait=True)
-    # control_lift_motor.run_angle(200,-50,then=Stop.HOLD,wait=True)
-    # drive_cm(-10, 30, 5)
-    # gyro_turn(-90, slow_turn=True)
-    # drive_cm(76, 30, 20)
-    # control_lift_motor.close()
-  
- 
 def mission_6():
     setup_drive()
     print("Mission 6")
-
+    
+def mission_7():
+    setup_drive()
+    print("Mission 7")
 
 MISSION_COLORS = [
     Color.RED,     # Mission 0
@@ -280,8 +330,9 @@ MISSION_COLORS = [
     Color.YELLOW,  # Mission 2
     Color.GREEN,   # Mission 3
     Color.BLUE,    # Mission 4
-    Color.BLACK,  # Mission 5
+    Color.BLACK,   # Mission 5
     Color.MAGENTA, # Mission 6
+    Color.CYAN,    # Mission 7
 ]
 POLL_MS = 50
 def set_mission_light(index):
@@ -297,8 +348,8 @@ MISSIONS = [
     ("Mission 3", mission_3),
     ("Mission 4", mission_4),
     ("Mission 5", mission_5),
-    ("Mission 6", mission_6)
-
+    ("Mission 6", mission_6),
+    ("Mission 7", mission_7)
 ]
 
 # -----------------------------
