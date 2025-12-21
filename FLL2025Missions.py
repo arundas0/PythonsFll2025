@@ -184,7 +184,9 @@ def drive_cm_stall(distance_cm: float,
         # print("inside drice with stall while loop")
         # print(robot.stalled())
         # Stall is a property, not a callable
-        if getattr(robot, "stalled", False):
+        stalled_attr = getattr(robot, "stalled", None)
+        stalled = stalled_attr() if callable(stalled_attr) else bool(stalled_attr)
+        if stalled:
             # print(robot.stalled())
             # Stop the robot immediately and report failure
             # print("motor is stalled")
