@@ -47,8 +47,11 @@ def emergency_stop_check():
         hub.speaker.beep(200, 300)
         raise RuntimeError("Emergency stop")
 
-def setup_drive():
-    robot.straight(-10)
+def setup_drive(back=1):
+    
+    if back > 0:
+       robot.straight(-10)
+    
     robot.reset()
     # “Default-ish” settings; missions override per move
     robot.settings(straight_speed=300, straight_acceleration=300)
@@ -277,26 +280,18 @@ def mission_1():
     drive_cm(-35, 30, 100)
 
 def mission_2():
-    setup_drive()
-    # print("Mission 2")
-
-    hub.imu.reset_heading(0)
-    wait(200)
-
-    drive_cm(37, 30, 50)
+    setup_drive(0)
 
     # SPIKE had a complex stall-detect version; here is a simpler "repeat wiggle" version:
     for _ in range(3):  # repetitions=3
-        run_motor_for_degrees(motor_c, -180, 750)
-        run_motor_for_degrees(motor_c, 180, 750)
-
-    drive_cm(-35, 30, 50)
+        run_motor_for_degrees(motor_c, -180, 270)
+        run_motor_for_degrees(motor_c, 180, 270)
 
 def mission_3():
-    setup_drive()
+    setup_drive(0)
 
     hub.imu.reset_heading(0)
-    drive_cm(200, 30, 50)
+    drive_cm(200, 70, 50)
 
 def mission_4(): #Adi Mission - Get the broom Start from left edge of E
     setup_drive()
@@ -324,7 +319,7 @@ def mission_5():
     motor_c.run_until_stalled(-300, then=Stop.BRAKE, duty_limit=50) #drop gear mechanism
     drive_cm(2, 30, 10)
     motor_d.run_until_stalled(-500, then=Stop.BRAKE, duty_limit=60) #run gear mechanism
-    motor_c.run_until_stalled(400, then=Stop.BRAKE, duty_limit=100) #raise gear mechanism
+    motor_c.run_until_stalled(400, then=Stop.BRAKE, duty_limit=100) #raise gear mechanism //TODO: Change to turn motor
     drive_cm(-50, 30, 50) #back to home
  
 def mission_6(): #Deposit Stuff
