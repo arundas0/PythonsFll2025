@@ -1,27 +1,3 @@
-
-Compare text
-Find the difference between two text files
-
-
-
-Real-time diff
-
-Unified diff
-
-Collapse lines
-
-Highlight change
-Syntax highlighting
-Tools
-Diffchecker Desktop icon
-Diffchecker Desktop
-The most secure way to run Diffchecker. Get the Diffchecker Desktop app: your diffs never leave your computer!
-Untitled diff
-28 removals
-455 lines
-92 additions
-519 lines
-
 from pybricks.hubs import PrimeHub
 
 from pybricks.pupdevices import Motor, ColorSensor
