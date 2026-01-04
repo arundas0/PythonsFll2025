@@ -1,0 +1,3 @@
+pybricks
+# Optional (for running extra tests locally):
+# pytest
